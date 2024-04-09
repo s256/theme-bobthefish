@@ -656,17 +656,27 @@ end
 # Cloud Tools
 # ==============================
 
-function __bobthefish_prompt_aws_vault_profile -S -d 'Show AWS Vault profile'
-    [ "$theme_display_aws_vault_profile" = 'yes' ]
+function __bobthefish_prompt_aws_vault_profile -S -d 'Show AWS \(Vault\) profile'
+    [ "$theme_display_aws_vault_profile" = 'yes' -o "$theme_display_aws_profile" = 'yes' ]
     or return
 
-    [ -n "$AWS_VAULT" -a -n "$AWS_SESSION_EXPIRATION" ]
+    set -l AWS_SSO_CLI_CACHE (grep -Ril "startUrl" ~/.aws/sso/cache)
+
+    [ -n "$AWS_SESSION_EXPIRATION" -a \( -n "$AWS_VAULT" -o -n "$AWS_PROFILE" \) -o -n "$AWS_SSO_CLI_CACHE" ]
     or return
 
-    set -l profile $AWS_VAULT
+    [ -n "$AWS_SSO_CLI_CACHE" ]
+    and set -l expiry_date (cat $AWS_SSO_CLI_CACHE | jq -r .expiresAt )
+    and set -l profile "AWS SSO CLI Profile"
+    [ -n "$AWS_VAULT" ]
+    and set -l profile $AWS_VAULT
+    [ -n "$AWS_PROFILE" ]
+    and set -l profile $AWS_PROFILE
 
     set -l now (date --utc +%s)
-    set -l expiry (date -d "$AWS_SESSION_EXPIRATION" +%s)
+    [ -n "$AWS_PROFILE" ]
+    and set -l expiry (date -d "$AWS_SESSION_EXPIRATION" +%s)
+    or set -l expiry (date -d "$expiry_date" +%s)
     set -l diff_mins (math "floor(( $expiry - $now ) / 60)")
 
     set -l diff_time $diff_mins"m"
