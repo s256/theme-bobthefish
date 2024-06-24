@@ -660,20 +660,32 @@ function __bobthefish_prompt_aws_vault_profile -S -d 'Show AWS \(Vault\) profile
     [ "$theme_display_aws_vault_profile" = 'yes' -o "$theme_display_aws_profile" = 'yes' ]
     or return
 
-    set -l AWS_SSO_CLI_CACHE (grep -Ril "startUrl" ~/.aws/sso/cache)
+    set -l AWS_SSO_CLI_CACHE (grep -Ril --exclude "aws*" "startUrl" ~/.aws/sso/cache)
 
     [ -n "$AWS_SESSION_EXPIRATION" -a \( -n "$AWS_VAULT" -o -n "$AWS_PROFILE" \) -o -n "$AWS_SSO_CLI_CACHE" ]
     or return
 
+    # Filter out files that contain the "scopes" key
+    for file in $AWS_SSO_CLI_CACHE
+        cat $file | jq 'has("scopes")' | grep -q true
+        and set AWS_SSO_CLI_CACHE (echo $AWS_SSO_CLI_CACHE | grep -v $file)
+    end
+
     [ -n "$AWS_SSO_CLI_CACHE" ]
-    and set -l expiry_date (cat $AWS_SSO_CLI_CACHE | jq -r .expiresAt )
-    and set -l profile "AWS SSO CLI Profile"
+    and set -l expiry_date (cat $AWS_SSO_CLI_CACHE | jq -r .expiresAt)
+    and set -l expiry (date -d "$expiry_date" +%s)
+    and set -l now (date --utc +%s)
+
+    [ $now -gt $expiry ]
+    and return
+
+    set -l profile "AWS SSO CLI Profile"
+
     [ -n "$AWS_VAULT" ]
     and set -l profile $AWS_VAULT
     [ -n "$AWS_PROFILE" ]
     and set -l profile $AWS_PROFILE
 
-    set -l now (date --utc +%s)
     [ -n "$AWS_PROFILE" ]
     and set -l expiry (date -d "$AWS_SESSION_EXPIRATION" +%s)
     or set -l expiry (date -d "$expiry_date" +%s)
@@ -693,6 +705,8 @@ function __bobthefish_prompt_aws_vault_profile -S -d 'Show AWS \(Vault\) profile
     __bobthefish_start_segment $status_color
     echo -ns $segment ' '
 end
+
+
 
 
 # ==============================
