@@ -655,58 +655,59 @@ end
 # ==============================
 # Cloud Tools
 # ==============================
-
-function __bobthefish_prompt_aws_vault_profile -S -d 'Show AWS \(Vault\) profile'
+function __bobthefish_prompt_aws_vault_profile -S -d 'Show AWS SSO profiles sorted by expiry'
     [ "$theme_display_aws_vault_profile" = 'yes' -o "$theme_display_aws_profile" = 'yes' ]
     or return
 
+    # Find all SSO cache files
     set -l AWS_SSO_CLI_CACHE (grep -Ril --exclude "aws*" "startUrl" ~/.aws/sso/cache)
+    
+    # Initialize current time
+    set -l now (date --utc +%s)
 
-    [ -n "$AWS_SESSION_EXPIRATION" -a \( -n "$AWS_VAULT" -o -n "$AWS_PROFILE" \) -o -n "$AWS_SSO_CLI_CACHE" ]
-    or return
+    # Initialize an array to store session details with a sorting key
+    set -l sessions
 
-    # Filter out files that contain the "scopes" key
+    # Parse each file to extract PROFILENAME, expiry, and sort them by expiry time
     for file in $AWS_SSO_CLI_CACHE
-        cat $file | jq 'has("scopes")' | grep -q true
-        and set AWS_SSO_CLI_CACHE (echo $AWS_SSO_CLI_CACHE | grep -v $file)
+        if test -f $file
+            # Extract expiresAt and startUrl fields from the file
+            set -l expiry_date (cat $file | jq -r .expiresAt)
+            set -l start_url (cat $file | jq -r .startUrl)
+            
+            # Convert expiry_date to seconds and calculate time remaining
+            set -l expiry (date -d "$expiry_date" +%s)
+            set -l diff_secs (math "$expiry - $now")
+            set -l diff_mins (math "floor($diff_secs / 60)")
+
+            # Determine if the session is expired and format time remaining
+            set -l diff_time "$diff_mins"m
+            if test $diff_mins -le 0
+                set diff_time "0m"
+            else if test $diff_mins -ge 60
+                set -l hours (math "floor($diff_mins / 60)")
+                set -l minutes (math "$diff_mins % 60")
+                set diff_time "$hours"h"$minutes"m
+            end
+
+            # Extract PROFILENAME from startUrl
+            set -l profile_name (string match -r --groups-only 'https://([^.]+).awsapps.com' $start_url)
+
+            # Store each session text with expiry time for sorting
+            set sessions "$sessions" "$expiry|AWS SSO $profile_name ($diff_time)"
+        end
     end
 
-    [ -n "$AWS_SSO_CLI_CACHE" ]
-    and set -l expiry_date (cat $AWS_SSO_CLI_CACHE | jq -r .expiresAt)
-    and set -l expiry (date -d "$expiry_date" +%s)
-    and set -l now (date --utc +%s)
+    # Sort sessions by the expiry timestamp in descending order (furthest to closest expiry)
+    set -l sorted_sessions (printf "%s\n" $sessions | sort -t'|' -r -k1)
 
-    [ $now -gt $expiry ]
-    and return
+    # Remove sort keys and combine session texts into a single segment string
+    set -l segment (printf "%s\n" $sorted_sessions | sed 's/^[^|]*|//' | string join " | ")
 
-    set -l profile "AWS SSO CLI Profile"
-
-    [ -n "$AWS_VAULT" ]
-    and set -l profile $AWS_VAULT
-    [ -n "$AWS_PROFILE" ]
-    and set -l profile $AWS_PROFILE
-
-    [ -n "$AWS_PROFILE" ]
-    and set -l expiry (date -d "$AWS_SESSION_EXPIRATION" +%s)
-    or set -l expiry (date -d "$expiry_date" +%s)
-    set -l diff_mins (math "floor(( $expiry - $now ) / 60)")
-
-    set -l diff_time $diff_mins"m"
-    [ $diff_mins -le 0 ]
-    and set -l diff_time '0m'
-    [ $diff_mins -ge 60 ]
-    and set -l diff_time (math "floor($diff_mins / 60)")"h"(math "$diff_mins % 60")"m"
-
-    set -l segment $profile ' (' $diff_time ')'
-    set -l status_color $color_aws_vault
-    [ $diff_mins -le 0 ]
-    and set -l status_color $color_aws_vault_expired
-
-    __bobthefish_start_segment $status_color
+    # Display the final segment with color
+    __bobthefish_start_segment $color_aws_vault
     echo -ns $segment ' '
 end
-
-
 
 
 # ==============================
